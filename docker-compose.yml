@@ -1,0 +1,15 @@
+services:
+  jenkins:
+    image: jenkins/jenkins:lts-jdk21
+    ports:
+      - "8081:8080"
+      - "50000:50000"
+    volumes:
+      - jenkins_home:/var/jenkins_home
+  web:
+    build: .
+    image: cicd-vite-demo:local
+    ports:
+      - "8080:80"
+volumes:
+  jenkins_home:
