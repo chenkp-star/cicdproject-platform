@@ -18,7 +18,7 @@ pipeline {
       steps { sh 'docker build --pull -t $IMAGE .' }
     }
     stage('Deploy local environment') {
-      when { branch 'main' }
+      when { expression { params.FRONTEND_BRANCH == 'main' } }
       steps {
         sh 'docker stop $CONTAINER || true'
         sh 'docker rm $CONTAINER || true'
@@ -28,6 +28,7 @@ pipeline {
       }
     }
   }
-  post { success { echo 'Frontend image deployed at http://localhost:8080' } }
+  post { success { echo 'Frontend image build and deployment pipeline completed' } }
 }
+
 
