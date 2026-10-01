@@ -23,12 +23,18 @@ pipeline {
         sh 'docker stop $CONTAINER || true'
         sh 'docker rm $CONTAINER || true'
         sh 'docker run -d --name $CONTAINER --restart unless-stopped -p 8080:80 $IMAGE'
-        sh 'sleep 8'
-        sh 'test "$(docker inspect --format="{{.State.Health.Status}}" $CONTAINER)" = healthy'
+        sh '''
+          for i in $(seq 1 12); do
+            status=$(docker inspect --format='{{.State.Health.Status}}' "$CONTAINER")
+            if [ "$status" = "healthy" ]; then exit 0; fi
+            if [ "$status" = "unhealthy" ]; then docker logs "$CONTAINER"; exit 1; fi
+            sleep 5
+          done
+          docker inspect --format='health status: {{.State.Health.Status}}' "$CONTAINER"
+          exit 1
+        '''
       }
     }
   }
   post { success { echo 'Frontend image build and deployment pipeline completed' } }
 }
-
-
