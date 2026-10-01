@@ -1,5 +1,5 @@
 pipeline {
-  agent { label 'docker' }
+  agent any
   options { timestamps(); disableConcurrentBuilds() }
   triggers { pollSCM('H/5 * * * *') }
   parameters {
@@ -30,3 +30,4 @@ pipeline {
   }
   post { success { echo 'Frontend image deployed at http://localhost:8080' } }
 }
+
