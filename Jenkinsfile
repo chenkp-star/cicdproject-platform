@@ -40,6 +40,9 @@ pipeline {
     // 回滚目标 Jenkins 构建编号，例如 7；ACTION=DEPLOY 时忽略此参数。
     string(name: 'ROLLBACK_BUILD', defaultValue: '', description: '回滚到哪个 Jenkins 构建编号，例如 7')
 
+    // 本地用不同端口模拟多环境；企业中通常是不同服务器、命名空间或云账号。
+    choice(name: 'ENVIRONMENT', choices: ['dev', 'staging', 'production'], description: '部署环境：production 会等待人工审批')
+
 
     // 前端代码仓库地址
     string(
@@ -84,6 +87,11 @@ pipeline {
 
     // 回滚时使用历史构建镜像，例如 cicd-vite-demo:7。
     ROLLBACK_IMAGE = "cicd-vite-demo:${params.ROLLBACK_BUILD}"
+
+    // Demo 环境映射：dev=8082、staging=8083、production=8080。
+    // 企业环境会把这些目标替换为各环境的服务器地址、凭据和部署账号。
+    TARGET_CONTAINER = "cicd-vite-web-${params.ENVIRONMENT}"
+    TARGET_PORT = "${params.ENVIRONMENT == 'dev' ? '8082' : params.ENVIRONMENT == 'staging' ? '8083' : '8080'}"
   }
 
 
@@ -171,30 +179,42 @@ pipeline {
         '''
 
         // 停止并删除当前版本，再启动指定历史版本。
-        sh 'docker stop $CONTAINER || true'
-        sh 'docker rm $CONTAINER || true'
-        sh 'docker run -d --name $CONTAINER --restart unless-stopped -p 8080:80 $ROLLBACK_IMAGE'
+        sh 'docker stop $TARGET_CONTAINER || true'
+        sh 'docker rm $TARGET_CONTAINER || true'
+        sh 'docker run -d --name $TARGET_CONTAINER --restart unless-stopped -p $TARGET_PORT:80 $ROLLBACK_IMAGE'
 
         // 回滚也必须通过健康检查，避免把故障版本重新上线。
         sh '''
           for i in $(seq 1 12); do
-            status=$(docker inspect --format='{{.State.Health.Status}}' "$CONTAINER")
+            status=$(docker inspect --format='{{.State.Health.Status}}' "$TARGET_CONTAINER")
             if [ "$status" = "healthy" ]; then
               echo "Rollback deployed: $ROLLBACK_IMAGE"
               exit 0
             fi
             if [ "$status" = "unhealthy" ]; then
-              docker logs "$CONTAINER"
+              docker logs "$TARGET_CONTAINER"
               exit 1
             fi
             sleep 5
           done
-          docker inspect --format='health status: {{.State.Health.Status}}' "$CONTAINER"
+          docker inspect --format='health status: {{.State.Health.Status}}' "$TARGET_CONTAINER"
           exit 1
         '''
       }
       post {
         success { echo "Rollback completed with $ROLLBACK_IMAGE" }
+      }
+    }
+
+    // ==============================
+    // 生产发布审批
+    // ==============================
+    stage('Production approval') {
+      // 企业中这里通常接入 Jenkins 权限组、变更单或发布窗口审批。
+      // Demo 使用 input 模拟人工确认；只有 production 且执行 DEPLOY 时暂停。
+      when { expression { params.ACTION == 'DEPLOY' && params.ENVIRONMENT == 'production' } }
+      steps {
+        input message: '确认将当前构建发布到 production 吗？', ok: '确认发布', submitter: 'root'
       }
     }
 
@@ -210,7 +230,7 @@ pipeline {
       // 但不会真正部署
       when {
         expression {
-          params.ACTION == 'DEPLOY' && params.FRONTEND_BRANCH == 'main'
+          params.ACTION == 'DEPLOY' && (params.ENVIRONMENT == 'dev' || params.FRONTEND_BRANCH == 'main')
         }
       }
 
@@ -222,14 +242,14 @@ pipeline {
         // || true：
         // 如果容器不存在或者已经停止，
         // 也不要让 Jenkins Pipeline 报错失败
-        sh 'docker stop $CONTAINER || true'
+        sh 'docker stop $TARGET_CONTAINER || true'
 
 
         // 删除旧的前端容器
         //
         // 删除容器以后，
         // 后面才能使用相同的容器名重新创建新容器
-        sh 'docker rm $CONTAINER || true'
+        sh 'docker rm $TARGET_CONTAINER || true'
 
 
         // 使用刚刚构建的新镜像启动容器
@@ -237,14 +257,14 @@ pipeline {
         // -d：
         // 后台运行
         //
-        // --name $CONTAINER：
+        // --name $TARGET_CONTAINER：
         // 指定容器名 cicd-vite-web
         //
         // --restart unless-stopped：
         // Docker / 服务器重启以后自动重新启动容器
         // 除非之前是手动停止的
         //
-        // -p 8080:80：
+        // -p $TARGET_PORT:80：
         // 宿主机 8080 端口
         //       ↓
         // 容器内部 Nginx 80 端口
@@ -253,7 +273,7 @@ pipeline {
         // http://服务器IP:8080
         //
         // 访问这个前端项目
-        sh 'docker run -d --name $CONTAINER --restart unless-stopped -p 8080:80 $IMAGE'
+        sh 'docker run -d --name $TARGET_CONTAINER --restart unless-stopped -p $TARGET_PORT:80 $IMAGE'
 
 
         // ==============================
@@ -275,7 +295,7 @@ pipeline {
             # starting
             # healthy
             # unhealthy
-            status=$(docker inspect --format='{{.State.Health.Status}}' "$CONTAINER")
+            status=$(docker inspect --format='{{.State.Health.Status}}' "$TARGET_CONTAINER")
 
 
             # 如果状态为 healthy
@@ -292,7 +312,7 @@ pipeline {
             #
             # 然后让 Jenkins Pipeline 失败
             if [ "$status" = "unhealthy" ]; then
-              docker logs "$CONTAINER"
+              docker logs "$TARGET_CONTAINER"
               exit 1
             fi
 
@@ -306,7 +326,7 @@ pipeline {
           # 如果检查了 12 次还是没有 healthy
           #
           # 打印最终健康状态
-          docker inspect --format='health status: {{.State.Health.Status}}' "$CONTAINER"
+          docker inspect --format='health status: {{.State.Health.Status}}' "$TARGET_CONTAINER"
 
 
           # Pipeline 标记为失败
@@ -351,4 +371,5 @@ pipeline {
     }
   }
 }
+
 

@@ -263,3 +263,22 @@ Jenkins 会执行：
 目标镜像不存在时流水线直接失败，不会删除当前容器。回滚也必须通过 `/healthz` 健康检查。
 
 镜像只保存在当前 Docker 主机时，清理镜像后不能回滚；生产环境应把镜像推送到 Harbor 或云镜像仓库。
+
+## 14. 多环境与生产审批
+
+Jenkins 参数：
+
+| 参数 | 作用 |
+| --- | --- |
+| `ENVIRONMENT=dev` | 本地模拟开发环境，端口 8082，可直接部署 |
+| `ENVIRONMENT=staging` | 本地模拟预发布环境，端口 8083，通常使用 main 分支 |
+| `ENVIRONMENT=production` | 本地模拟生产环境，端口 8080，部署前等待人工审批 |
+
+生产流程：
+
+```text
+Build with Parameters → ACTION=DEPLOY → ENVIRONMENT=production → Build
+→ Jenkins 暂停等待 input → 有权限的发布人确认 → 部署 production
+```
+
+本地容器名分别为 `cicd-vite-web-dev`、`cicd-vite-web-staging`、`cicd-vite-web-production`。企业环境通常会改成独立服务器、云账号、命名空间、域名和凭据，并由权限组限制谁可以审批生产发布。
