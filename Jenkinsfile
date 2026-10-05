@@ -34,6 +34,12 @@ pipeline {
     // OFF：不通知；MOCK：仅预览；LIVE：使用 Jenkins 凭据发送。
     choice(name: 'FEISHU_MODE', choices: ['OFF', 'MOCK', 'LIVE'], description: '部署成功后的飞书通知模式')
 
+    // 发布：重新构建并部署；回滚：复用已存在的历史镜像，不重新构建。
+    choice(name: 'ACTION', choices: ['DEPLOY', 'ROLLBACK'], description: '选择发布或回滚操作')
+
+    // 回滚目标 Jenkins 构建编号，例如 7；ACTION=DEPLOY 时忽略此参数。
+    string(name: 'ROLLBACK_BUILD', defaultValue: '', description: '回滚到哪个 Jenkins 构建编号，例如 7')
+
 
     // 前端代码仓库地址
     string(
@@ -75,6 +81,9 @@ pipeline {
     //
     // 每次部署都会使用同一个容器名
     CONTAINER = 'cicd-vite-web'
+
+    // 回滚时使用历史构建镜像，例如 cicd-vite-demo:7。
+    ROLLBACK_IMAGE = "cicd-vite-demo:${params.ROLLBACK_BUILD}"
   }
 
 
@@ -87,6 +96,7 @@ pipeline {
     // 第一阶段：拉取前端代码
     // ==============================
     stage('Checkout application') {
+      when { expression { params.ACTION == 'DEPLOY' } }
 
       steps {
 
@@ -116,6 +126,7 @@ pipeline {
     // 第二阶段：构建 Docker 镜像
     // ==============================
     stage('Build and verify') {
+      when { expression { params.ACTION == 'DEPLOY' } }
 
       steps {
 
@@ -139,6 +150,55 @@ pipeline {
 
 
     // ==============================
+    // 回滚阶段：使用历史镜像重新启动容器
+    // ==============================
+    stage('Rollback local environment') {
+      // 回滚不拉代码、不执行构建，只使用本机已有的历史镜像。
+      when { expression { params.ACTION == 'ROLLBACK' } }
+      steps {
+        // 先确认目标镜像存在，输入错误或镜像已被清理时立即失败。
+        sh '''
+          if [ -z "$ROLLBACK_BUILD" ]; then
+            echo "ROLLBACK_BUILD is required when ACTION=ROLLBACK"
+            exit 1
+          fi
+          docker image inspect "$ROLLBACK_IMAGE" >/dev/null 2>&1 || {
+            echo "Rollback image not found: $ROLLBACK_IMAGE"
+            echo "Available images:"
+            docker images cicd-vite-demo
+            exit 1
+          }
+        '''
+
+        // 停止并删除当前版本，再启动指定历史版本。
+        sh 'docker stop $CONTAINER || true'
+        sh 'docker rm $CONTAINER || true'
+        sh 'docker run -d --name $CONTAINER --restart unless-stopped -p 8080:80 $ROLLBACK_IMAGE'
+
+        // 回滚也必须通过健康检查，避免把故障版本重新上线。
+        sh '''
+          for i in $(seq 1 12); do
+            status=$(docker inspect --format='{{.State.Health.Status}}' "$CONTAINER")
+            if [ "$status" = "healthy" ]; then
+              echo "Rollback deployed: $ROLLBACK_IMAGE"
+              exit 0
+            fi
+            if [ "$status" = "unhealthy" ]; then
+              docker logs "$CONTAINER"
+              exit 1
+            fi
+            sleep 5
+          done
+          docker inspect --format='health status: {{.State.Health.Status}}' "$CONTAINER"
+          exit 1
+        '''
+      }
+      post {
+        success { echo "Rollback completed with $ROLLBACK_IMAGE" }
+      }
+    }
+
+    // ==============================
     // 第三阶段：部署到本地 Docker 环境
     // ==============================
     stage('Deploy local environment') {
@@ -150,7 +210,7 @@ pipeline {
       // 但不会真正部署
       when {
         expression {
-          params.FRONTEND_BRANCH == 'main'
+          params.ACTION == 'DEPLOY' && params.FRONTEND_BRANCH == 'main'
         }
       }
 

@@ -231,3 +231,35 @@ Harbor/云镜像仓库 + Webhook + 发布审批 + 多环境 + 回滚 + Trivy 扫
 ## 12. 面试总结
 
 > 业务仓库和平台仓库分离。Jenkins 从平台仓库读取 Jenkinsfile，再拉取指定分支的前端源码，使用 Node 22 执行测试和 Vite 构建，通过多阶段 Dockerfile 将构建产物复制到 Nginx 镜像，最后替换运行容器并通过 `/healthz` 完成部署验证。当前 Demo 使用手动发布，生产环境可以接入镜像仓库、Webhook、审批和回滚机制。
+
+## 13. Jenkins 一键回滚
+
+Jenkins 任务现在支持两个操作：
+
+| 参数 | 作用 |
+| --- | --- |
+| `ACTION=DEPLOY` | 拉取源码、检查、构建新镜像并部署 |
+| `ACTION=ROLLBACK` | 不拉源码、不构建，直接部署已有历史镜像 |
+
+回滚步骤：
+
+```text
+Build with Parameters
+→ ACTION=ROLLBACK
+→ ROLLBACK_BUILD=7
+→ Build
+```
+
+Jenkins 会执行：
+
+```text
+检查 cicd-vite-demo:7 是否存在
+→ 停止当前 cicd-vite-web
+→ 启动 cicd-vite-demo:7
+→ 等待 healthy
+→ 回滚完成
+```
+
+目标镜像不存在时流水线直接失败，不会删除当前容器。回滚也必须通过 `/healthz` 健康检查。
+
+镜像只保存在当前 Docker 主机时，清理镜像后不能回滚；生产环境应把镜像推送到 Harbor 或云镜像仓库。
