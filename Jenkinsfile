@@ -31,6 +31,9 @@ pipeline {
   //
   // 就可以修改这些参数
   parameters {
+    // OFF：不通知；MOCK：仅预览；LIVE：使用 Jenkins 凭据发送。
+    choice(name: 'FEISHU_MODE', choices: ['OFF', 'MOCK', 'LIVE'], description: '部署成功后的飞书通知模式')
+
 
     // 前端代码仓库地址
     string(
@@ -249,6 +252,28 @@ pipeline {
           # Pipeline 标记为失败
           exit 1
         '''
+      }
+      // 仅此部署阶段成功（包含健康检查）后通知；非 main 分支跳过部署也不通知。
+      post {
+        success {
+          script {
+            try {
+              if (params.FEISHU_MODE == 'MOCK') {
+                sh 'python3 scripts/notify-feishu.py --mock'
+              } else if (params.FEISHU_MODE == 'LIVE') {
+                withCredentials([
+                  string(credentialsId: 'feishu-webhook', variable: 'FEISHU_WEBHOOK'),
+                  string(credentialsId: 'feishu-secret', variable: 'FEISHU_SECRET')
+                ]) {
+                  sh 'set +x; python3 scripts/notify-feishu.py'
+                }
+              }
+            } catch (Exception ignored) {
+              // 通知失败与部署失败分开报告，不打印可能含有凭据的异常。
+              echo '部署已成功，但飞书通知失败；请检查通知脚本日志和凭据设置。'
+            }
+          }
+        }
       }
     }
   }
