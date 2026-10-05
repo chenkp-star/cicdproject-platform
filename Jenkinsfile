@@ -133,7 +133,7 @@ pipeline {
         // 注意：
         // 如果 Dockerfile 实际在 app 目录中，
         // 这里应该进入 app 后再执行 docker build
-        sh 'docker build --pull -t $IMAGE .'
+        sh 'docker build --pull --build-arg VITE_SENTRY_RELEASE="$IMAGE" -t $IMAGE .'
       }
     }
 
@@ -291,3 +291,4 @@ pipeline {
     }
   }
 }
+

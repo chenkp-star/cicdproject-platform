@@ -1,6 +1,9 @@
 # Platform delivery repository
 FROM node:22-alpine AS build
 WORKDIR /app
+# 公开构建标识；上传 Token 不应通过 ARG/ENV 写入镜像。
+ARG VITE_SENTRY_RELEASE=cicd-vite-demo@local
+ENV VITE_SENTRY_RELEASE=$VITE_SENTRY_RELEASE
 COPY app/package.json app/package-lock.json ./
 RUN npm ci
 COPY app/index.html ./
@@ -17,6 +20,7 @@ COPY nginx/default.conf /etc/nginx/conf.d/default.conf
 COPY --from=build /app/dist /usr/share/nginx/html
 EXPOSE 80
 HEALTHCHECK --interval=30s --timeout=3s --retries=3 CMD wget -q -O /dev/null http://localhost/healthz || exit 1
+
 
 
 
